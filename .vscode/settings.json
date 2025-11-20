@@ -1,0 +1,6 @@
+{
+    "files.encoding": "utf8bom",
+    "files.autoGuessEncoding": false,
+    "files.eol": "\n",
+    "powershell.scriptAnalysis.enable": false
+}

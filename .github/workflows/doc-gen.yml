@@ -1,0 +1,123 @@
+﻿name: Auto-Generate README
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - '**'
+
+permissions:
+  contents: write
+
+jobs:
+  generate-docs:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install tree utility
+        run: sudo apt-get update && sudo apt-get install -y tree
+
+      - name: Generate folder structure
+        run: |
+          echo "Project Folder Structure" > folder_structure.txt
+          echo "------------------------" >> folder_structure.txt
+          tree -a -I '.git|.github|__pycache__|.venv' >> folder_structure.txt
+
+      - name: Upload folder_structure.txt (debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: folder-structure
+          path: folder_structure.txt
+
+      - name: Install OpenAI SDK
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install openai
+
+      - name: Generate README using OpenAI
+        run: |
+          python3 - << 'EOF'
+          import os
+          import openai
+
+          openai.api_key = os.getenv("OPENAI_API_KEY")
+
+          with open("folder_structure.txt") as f:
+              folder_tree = f.read()
+
+          prompt = f"""
+            You are an expert technical writer. Generate a clean, professional README.md for this repository.
+
+            Project Name:
+            Talk to My Data
+
+            Summary:
+            This project provides an LLM-driven interface for interacting with Snowflake. Users can issue natural-language queries, which the system converts into SQL, executes against Snowflake, and returns results. The repository includes utilities, configuration management, automation scripts, and Snowflake connectivity.
+
+            The README must include the following sections:
+
+            1. Project Overview
+            2. Features
+            3. Architecture Summary
+            4. Folder Structure Explanation
+            5. Setup Instructions
+            6. Running the Application
+            7. configs/ Explanation
+            8. utils/ Explanation
+            9. sandbox/ Explanation (clarify it is for scratch experiments)
+            10. Example Usage
+            11. Contribution Guidelines
+            12. License
+
+            Use the real folder structure to infer details:
+
+            {folder_tree}
+
+            Environment File Example (minimal):
+            SNOWFLAKE_ACCOUNT=
+            SNOWFLAKE_USER=
+            SNOWFLAKE_PASSWORD=
+            SNOWFLAKE_ROLE=
+            SNOWFLAKE_DATABASE=
+            SNOWFLAKE_SCHEMA=
+            SNOWFLAKE_WAREHOUSE=
+            OPENAI_API_KEY=
+
+            Important instructions:
+            - Do NOT add code fences.
+            - Do NOT hallucinate files.
+            - Use clear Markdown headings starting with ##.
+            - Keep the README concise but helpful.
+          """
+
+          completion = openai.chat.completions.create(
+              model="gpt-4o-mini",
+              messages=[{"role": "user", "content": prompt}]
+          )
+
+          output = completion.choices[0].message.content
+
+          with open("README.md", "w") as f:
+              f.write(output)
+          EOF
+
+      - name: Commit README.md
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet README.md; then
+            echo "No README changes."
+            exit 0
+          fi
+
+          git add README.md
+          git commit -m "Auto-update README via GPT"
+          git push

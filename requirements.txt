@@ -1,0 +1,13 @@
+# --- LangChain core ---
+langchain>=0.2.10
+langchain-core>=0.2.10
+langchain-community>=0.2.10
+langchain-openai>=0.1.7
+
+# --- Snowflake + SQL ---
+snowflake-connector-python==3.10.0
+snowflake-sqlalchemy==1.6.1
+SQLAlchemy==2.0.25
+
+# --- Streamlit UI ---
+streamlit==1.37.0

@@ -1,0 +1,30 @@
+bundle:
+  name: talk_to_my_data
+  type: python
+  version: 1.0.0
+
+environments:
+  dev:
+    variables:
+      ENV: dev
+      SNOWFLAKE_ACCOUNT: <your_account>
+      SNOWFLAKE_DB: DEMO_DB
+      SNOWFLAKE_SCHEMA: AI_APPS
+  prod:
+    variables:
+      ENV: prod
+      SNOWFLAKE_ACCOUNT: <your_prod_account>
+      SNOWFLAKE_DB: PROD_ANALYTICS
+      SNOWFLAKE_SCHEMA: AI_APPS
+
+resources:
+  jobs:
+    - name: talk_to_my_data_job
+      entrypoint: src/main_app.py
+      parameters:
+        model: gpt-4o
+      schedule: manual
+
+dependencies:
+  - python=3.10
+  - requirements.txt

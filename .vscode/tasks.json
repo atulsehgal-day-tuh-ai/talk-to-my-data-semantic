@@ -1,0 +1,11 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "generate-folder-tree",
+      "type": "shell",
+      "command": "tree /F /A > folder_structure.txt",
+      "problemMatcher": []
+    }
+  ]
+}

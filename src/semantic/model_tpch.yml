@@ -1,0 +1,365 @@
+﻿version: 1
+
+dataset: tpch_sf1
+description: >
+  Semantic model for the TPCH_SF1 schema in SNOWFLAKE_SAMPLE_DATA. Defines
+  tables, measures, dimensions, and relationships to support NL→SQL over
+  sales, customers, products, suppliers, and geography.
+
+tables:
+  customer:
+    type: dimension
+    primary_key: c_custkey
+    description: Customer master data.
+    columns:
+      c_custkey:
+        role: key
+        description: Customer surrogate key.
+      c_name:
+        role: attribute
+        description: Customer name.
+        synonyms: [customer_name, name, client]
+      c_address:
+        role: attribute
+        description: Customer street address.
+      c_nationkey:
+        role: foreign_key
+        references: nation.n_nationkey
+        description: Link to customer nation.
+      c_phone:
+        role: attribute
+      c_acctbal:
+        role: numeric
+        description: Customer account balance.
+      c_mktsegment:
+        role: attribute
+        description: Marketing segment of the customer.
+        synonyms: [segment, market_segment]
+      c_comment:
+        role: attribute
+
+  orders:
+    type: fact_header
+    primary_key: o_orderkey
+    description: >
+      Order header table: one row per order, with order date, priority,
+      customer, and overall comment.
+    columns:
+      o_orderkey:
+        role: key
+        description: Order key.
+      o_custkey:
+        role: foreign_key
+        references: customer.c_custkey
+        description: Customer placing the order.
+      o_orderstatus:
+        role: attribute
+        description: Order status flag.
+      o_totalprice:
+        role: numeric
+        description: Header-level total order price.
+        semantic_hint: order_amount
+      o_orderdate:
+        role: date
+        description: Order entry date.
+        synonyms: [order_date, transaction_date, date]
+      o_orderpriority:
+        role: attribute
+      o_clerk:
+        role: attribute
+      o_shippriority:
+        role: attribute
+      o_comment:
+        role: attribute
+
+  lineitem:
+    type: fact
+    primary_key: [l_orderkey, l_linenumber]
+    description: >
+      Transaction-level line items. This is the main fact table for sales,
+      quantity, discount, and tax analysis.
+    columns:
+      l_orderkey:
+        role: foreign_key
+        references: orders.o_orderkey
+        description: Header order key.
+      l_partkey:
+        role: foreign_key
+        references: part.p_partkey
+      l_suppkey:
+        role: foreign_key
+        references: supplier.s_suppkey
+      l_linenumber:
+        role: attribute
+      l_quantity:
+        role: numeric
+        description: Ordered quantity.
+        semantic_hint: quantity
+      l_extendedprice:
+        role: numeric
+        description: Extended line price before discount.
+        semantic_hint: gross_line_amount
+      l_discount:
+        role: numeric
+        description: Discount rate (fraction).
+        semantic_hint: discount_rate
+      l_tax:
+        role: numeric
+      l_returnflag:
+        role: attribute
+      l_linestatus:
+        role: attribute
+      l_shipdate:
+        role: date
+        description: Ship date.
+        synonyms: [shipping_date]
+      l_commitdate:
+        role: date
+      l_receiptdate:
+        role: date
+      l_shipinstruct:
+        role: attribute
+      l_shipmode:
+        role: attribute
+      l_comment:
+        role: attribute
+
+  part:
+    type: dimension
+    primary_key: p_partkey
+    description: Product / part master.
+    columns:
+      p_partkey:
+        role: key
+      p_name:
+        role: attribute
+        description: Part name.
+        synonyms: [product_name, item_name]
+      p_mfgr:
+        role: attribute
+        description: Manufacturer identifier.
+      p_brand:
+        role: attribute
+        description: Brand.
+      p_type:
+        role: attribute
+        description: Product type.
+      p_size:
+        role: attribute
+        description: Part size.
+      p_container:
+        role: attribute
+        description: Packaging / container type.
+      p_retailprice:
+        role: numeric
+        description: Suggested retail price.
+      p_comment:
+        role: attribute
+
+  partsupp:
+    type: bridge
+    primary_key: [ps_partkey, ps_suppkey]
+    description: Part–supplier bridge with availability and cost info.
+    columns:
+      ps_partkey:
+        role: foreign_key
+        references: part.p_partkey
+      ps_suppkey:
+        role: foreign_key
+        references: supplier.s_suppkey
+      ps_availqty:
+        role: numeric
+        description: Available quantity.
+      ps_supplycost:
+        role: numeric
+        description: Supplier cost for the part.
+      ps_comment:
+        role: attribute
+
+  supplier:
+    type: dimension
+    primary_key: s_suppkey
+    description: Supplier master data.
+    columns:
+      s_suppkey:
+        role: key
+      s_name:
+        role: attribute
+        description: Supplier name.
+        synonyms: [vendor_name, supplier_name]
+      s_address:
+        role: attribute
+      s_nationkey:
+        role: foreign_key
+        references: nation.n_nationkey
+      s_phone:
+        role: attribute
+      s_acctbal:
+        role: numeric
+      s_comment:
+        role: attribute
+
+  nation:
+    type: dimension
+    primary_key: n_nationkey
+    description: Nation / country dimension.
+    columns:
+      n_nationkey:
+        role: key
+      n_name:
+        role: attribute
+        description: Nation / country name.
+        synonyms: [country, country_name]
+      n_regionkey:
+        role: foreign_key
+        references: region.r_regionkey
+      n_comment:
+        role: attribute
+
+  region:
+    type: dimension
+    primary_key: r_regionkey
+    description: Region dimension.
+    columns:
+      r_regionkey:
+        role: key
+      r_name:
+        role: attribute
+        description: Region name.
+        synonyms: [geographic_region, region_name]
+      r_comment:
+        role: attribute
+
+measures:
+  revenue:
+    expression: "SUM(l_extendedprice * (1 - l_discount))"
+    table: lineitem
+    description: Net sales revenue after discount at line level.
+    synonyms: [sales, net_sales, turnover, sales_revenue]
+
+  gross_sales:
+    expression: "SUM(l_extendedprice)"
+    table: lineitem
+    description: Gross sales before discount.
+    synonyms: [gross_revenue]
+
+  order_count:
+    expression: "COUNT(DISTINCT o_orderkey)"
+    table: orders
+    description: Number of distinct orders.
+    synonyms: [transactions, num_orders, order_volume]
+
+  avg_discount:
+    expression: "AVG(l_discount)"
+    table: lineitem
+    description: Average discount rate across line items.
+    synonyms: [average_discount]
+
+  quantity_sold:
+    expression: "SUM(l_quantity)"
+    table: lineitem
+    description: Total quantity sold.
+    synonyms: [volume, units_sold]
+
+dimensions:
+  order_date:
+    table: orders
+    column: o_orderdate
+    description: Order entry date.
+    time_grains: [day, month, quarter, year]
+    synonyms: [date, transaction_date, order_day]
+
+  ship_date:
+    table: lineitem
+    column: l_shipdate
+    description: Shipment date.
+    time_grains: [day, month, quarter, year]
+    synonyms: [shipping_date]
+
+  customer_name:
+    table: customer
+    column: c_name
+    description: Customer name.
+    synonyms: [customer, client]
+
+  customer_segment:
+    table: customer
+    column: c_mktsegment
+    description: Customer marketing segment.
+    synonyms: [segment, market_segment]
+
+  region_name:
+    table: region
+    column: r_name
+    description: Region name.
+    synonyms: [region, geographic_region]
+
+  nation_name:
+    table: nation
+    column: n_name
+    description: Nation / country name.
+    synonyms: [country, country_name]
+
+  supplier_name:
+    table: supplier
+    column: s_name
+    description: Supplier name.
+    synonyms: [vendor, supplier]
+
+  part_name:
+    table: part
+    column: p_name
+    description: Part / product name.
+    synonyms: [product, sku, item]
+
+  product_brand:
+    table: part
+    column: p_brand
+    description: Product brand
+    synonyms: ["brand", "product_brand", "brand_name"]
+
+relationships:
+  - from: orders.o_custkey
+    to: customer.c_custkey
+    type: many_to_one
+    description: Each order belongs to a single customer.
+
+  - from: lineitem.l_orderkey
+    to: orders.o_orderkey
+    type: many_to_one
+    description: Each line item belongs to a single order.
+
+  - from: customer.c_nationkey
+    to: nation.n_nationkey
+    type: many_to_one
+    description: Each customer is associated with a nation.
+
+  - from: supplier.s_nationkey
+    to: nation.n_nationkey
+    type: many_to_one
+    description: Each supplier is associated with a nation.
+
+  - from: nation.n_regionkey
+    to: region.r_regionkey
+    type: many_to_one
+    description: Each nation is associated with a region.
+
+  - from: lineitem.l_partkey
+    to: part.p_partkey
+    type: many_to_one
+    description: Line items reference a specific part.
+
+  - from: lineitem.l_suppkey
+    to: supplier.s_suppkey
+    type: many_to_one
+    description: Line items reference a specific supplier.
+
+  - from: partsupp.ps_partkey
+    to: part.p_partkey
+    type: many_to_one
+    description: Part–supplier cost mapping for each part.
+
+  - from: partsupp.ps_suppkey
+    to: supplier.s_suppkey
+    type: many_to_one
+    description: Part–supplier cost mapping for each supplier.
