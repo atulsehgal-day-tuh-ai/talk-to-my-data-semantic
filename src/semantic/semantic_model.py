@@ -100,6 +100,7 @@ class Relationship:
     to_table: str
     to_column: str
     type: str
+    role: Optional[str] = None
     description: Optional[str] = None
 
 
@@ -187,6 +188,7 @@ class SemanticModel:
                     to_table=to_table,
                     to_column=to_col,
                     type=rel.get("type", "many_to_one"),
+                    role=rel.get("role"),
                     description=rel.get("description"),
                 )
             )

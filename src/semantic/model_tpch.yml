@@ -322,44 +322,60 @@ relationships:
   - from: orders.o_custkey
     to: customer.c_custkey
     type: many_to_one
+    role: customer_hierarchy
     description: Each order belongs to a single customer.
 
   - from: lineitem.l_orderkey
     to: orders.o_orderkey
     type: many_to_one
+    role: order
     description: Each line item belongs to a single order.
+
+  - from: orders.o_orderkey
+    to: lineitem.l_orderkey
+    type: one_to_many
+    role: order
+    description: Orders have multiple line items.
 
   - from: customer.c_nationkey
     to: nation.n_nationkey
     type: many_to_one
+    role: customer_hierarchy
     description: Each customer is associated with a nation.
 
   - from: supplier.s_nationkey
     to: nation.n_nationkey
     type: many_to_one
+    role: supplier_hierarchy
     description: Each supplier is associated with a nation.
 
   - from: nation.n_regionkey
     to: region.r_regionkey
     type: many_to_one
+    role: customer_hierarchy   # we prefer customer-hierarchy for "region"
     description: Each nation is associated with a region.
 
   - from: lineitem.l_partkey
     to: part.p_partkey
     type: many_to_one
+    role: product_hierarchy
     description: Line items reference a specific part.
 
   - from: lineitem.l_suppkey
     to: supplier.s_suppkey
     type: many_to_one
+    role: supplier_hierarchy
     description: Line items reference a specific supplier.
 
   - from: partsupp.ps_partkey
     to: part.p_partkey
     type: many_to_one
+    role: product_hierarchy
     description: Part–supplier cost mapping for each part.
 
   - from: partsupp.ps_suppkey
     to: supplier.s_suppkey
     type: many_to_one
+    role: supplier_hierarchy
     description: Part–supplier cost mapping for each supplier.
+

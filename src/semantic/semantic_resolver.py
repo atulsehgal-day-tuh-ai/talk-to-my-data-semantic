@@ -54,28 +54,28 @@ class SemanticResolver:
 
         # Step 2: Build prompt for semantic reasoning
         prompt = f"""
-You are a semantic planner converting natural language into a structured semantic plan.
+                    You are a semantic planner converting natural language into a structured semantic plan.
 
-Available measures: {measure_names}
-Available dimensions: {dimension_names}
+                    Available measures: {measure_names}
+                    Available dimensions: {dimension_names}
 
-User question: "{question}"
+                    User question: "{question}"
 
-Tasks:
-1. Identify the correct measure based on synonyms and meaning.
-2. Identify the correct time dimension if present.
-3. Provide a Snowflake SQL time filter using CURRENT_DATE if the question asks for
-   "last month", "last 3 months", "last year", etc.
-4. Identify group-by dimensions if the question implies grouping.
-5. Return result strictly in this JSON format:
+                    Tasks:
+                    1. Identify the correct measure based on synonyms and meaning.
+                    2. Identify the correct time dimension if present.
+                    3. Provide a Snowflake SQL time filter using CURRENT_DATE if the question asks for
+                    "last month", "last 3 months", "last year", etc.
+                    4. Identify group-by dimensions if the question implies grouping.
+                    5. Return result strictly in this JSON format:
 
-{{
-  "measure": "<measure_name>",
-  "time_dimension": "<dimension_name or null>",
-  "time_filter": "<SQL predicate or null>",
-  "group_by_dimensions": ["<dim>", "<dim>", ...]
-}}
-"""
+                    {{
+                    "measure": "<measure_name>",
+                    "time_dimension": "<dimension_name or null>",
+                    "time_filter": "<SQL predicate or null>",
+                    "group_by_dimensions": ["<dim>", "<dim>", ...]
+                    }}
+                    """
 
         # Step 3: Call LLM
         response = self.llm.invoke(prompt).content
