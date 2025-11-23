@@ -261,6 +261,80 @@ measures:
     description: Total quantity sold.
     synonyms: [volume, units_sold]
 
+  average_order_size:
+    expression: "SUM(l_quantity) / COUNT(DISTINCT l_orderkey)"
+    table: lineitem
+    description: "Average quantity per order."
+    synonyms: ["average order", "avg order size", "average order size", "avg size"]
+
+  average_quantity:
+    expression: "AVG(l_quantity)"
+    table: lineitem
+    description: "Average quantity per line item."
+    synonyms: ["avg quantity", "average quantity", "avg qty"]
+
+  average_revenue:
+    expression: "AVG(l_extendedprice * (1 - l_discount))"
+    table: lineitem
+    description: "Average revenue per line item."
+    synonyms: ["average revenue", "avg revenue"]
+
+  profit:
+    expression: "SUM(l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity)"
+    table: lineitem
+    description: "Profit at line level."
+    synonyms: ["margin", "profit", "gross_profit", "gm"]
+
+  profit_margin_pct:
+    expression: "SUM(l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity)
+                / SUM(l_extendedprice * (1 - l_discount))"
+    table: lineitem
+    description: "Profit margin percentage."
+    synonyms: ["margin percent", "profit percentage", "margin rate", "gm percent", "gross margin"]
+
+  discount_amount:
+    expression: "SUM(l_extendedprice * l_discount)"
+    table: lineitem
+    description: "Total discount amount."
+    synonyms: ["discount dollars", "discount value", "total discount"]
+
+  average_order_value:
+    expression: "SUM(l_extendedprice * (1 - l_discount)) / COUNT(DISTINCT l_orderkey)"
+    table: lineitem
+    description: "Average revenue per order."
+    synonyms: ["aov", "avg order value", "order value", "average basket value"]
+
+  customer_count:
+    expression: "COUNT(DISTINCT c_custkey)"
+    table: customer
+    description: "Number of unique customers."
+    synonyms: ["unique customers", "customer volume", "num_customers"]
+
+  supplier_count:
+    expression: "COUNT(DISTINCT s_suppkey)"
+    table: supplier
+    description: "Unique supplier count."
+    synonyms: ["num suppliers", "supplier volume"]
+
+  arpc:
+    expression: "SUM(l_extendedprice * (1 - l_discount)) / COUNT(DISTINCT c_custkey)"
+    table: lineitem
+    description: "Average revenue per customer."
+    synonyms: ["avg revenue per customer", "arpc", "customer revenue"]
+
+  line_count:
+    expression: "COUNT(*)"
+    table: lineitem
+    description: "Number of line items."
+    synonyms: ["lines", "detail lines", "item lines"]
+
+  average_lines_per_order:
+    expression: "COUNT(*) / COUNT(DISTINCT l_orderkey)"
+    table: lineitem
+    description: "Average number of lines per order."
+    synonyms: ["avg lines per order", "line density"]
+
+
 dimensions:
   order_date:
     table: orders
@@ -310,7 +384,7 @@ dimensions:
     table: part
     column: p_name
     description: Part / product name.
-    synonyms: [product, sku, item]
+    synonyms: [product, sku, item, product_name, item_name, sku_name,product name, item name, sku name]
 
   product_brand:
     table: part

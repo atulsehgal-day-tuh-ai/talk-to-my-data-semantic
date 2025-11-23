@@ -18,80 +18,94 @@ from src.semantic.join_graph import JoinEdge
 class SQLGenerator:
     """
     Generate Snowflake SQL from a SemanticPlan and a list of JoinEdge objects.
+    Supports semantic-aware time grains (day, month, quarter, year).
     """
 
     def __init__(self):
-        # You can add config here later (e.g., database/schema)
         pass
 
     def _dim_ref(self, table: str, column: str) -> str:
-        """
-        Helper to build a fully-qualified column reference.
-        For now we don't alias tables to keep SQL simple.
-        """
+        """Build table.column reference (no aliasing yet)."""
         return f"{table}.{column}"
 
     def _apply_time_filter(self, plan: SemanticPlan) -> str:
         """
-        Take the semantic time_filter from the plan (which may use the
-        time_dimension's name like 'order_date') and convert it into a
-        valid SQL predicate using the real table+column.
+        Take the semantic time_filter from the plan and replace the semantic
+        time dimension name (e.g., 'order_date') with its physical
+        table.column reference.
         """
         if not plan.time_filter:
             return ""
 
         if not plan.time_dimension:
-            # Nothing to substitute, just return as is
             return plan.time_filter
 
-        # Example:
-        # time_dimension.name = "order_date"
-        # table = "orders", column = "o_orderdate"
-        # time_filter = "order_date >= DATEADD(month, -3, CURRENT_DATE)"
         semantic_name = plan.time_dimension.name
         physical_ref = self._dim_ref(
             plan.time_dimension.table,
             plan.time_dimension.column,
         )
 
-        predicate = plan.time_filter.replace(semantic_name, physical_ref)
-        return predicate
+        return plan.time_filter.replace(semantic_name, physical_ref)
 
+    # -------------------------------------------------------------------------
+    #   MAIN METHOD: sql_from_plan (UPDATED WITH TIME_GRAIN FIX)
+    # -------------------------------------------------------------------------
     def sql_from_plan(self, plan: SemanticPlan, joins: List[JoinEdge]) -> str:
         """
-        Build a full Snowflake SQL query string for the given semantic plan
-        and resolved join edges.
+        Build a full Snowflake SQL query string for the given semantic plan,
+        fully respecting time grains (day, month, quarter, year).
         """
 
-        # -------- SELECT clause --------
+        # ======================
+        # 1. SELECT CLAUSE
+        # ======================
         select_exprs = []
 
-        # Measure
-        # e.g., "SUM(l_extendedprice * (1 - l_discount)) AS revenue"
+        # --- Measure Expression ---
         measure_expr = f"{plan.measure.expression} AS {plan.measure.name}"
         select_exprs.append(measure_expr)
 
-        # Group-by dimensions
+        # --- Time Grain Expression (if requested) ---
+        time_col = None
+        grain_expr = None
+
+        if plan.time_dimension:
+            time_col = self._dim_ref(
+                plan.time_dimension.table,
+                plan.time_dimension.column
+            )
+
+            if plan.time_grain:
+                # Example: DATE_TRUNC('month', orders.o_orderdate)
+                grain_expr = (
+                    f"DATE_TRUNC('{plan.time_grain}', {time_col}) "
+                    f"AS {plan.time_grain}_date"
+                )
+                select_exprs.append(grain_expr)
+
+            else:
+                # No grain → output raw date
+                select_exprs.append(f"{time_col} AS {plan.time_dimension.name}")
+
+        # --- Group-by Dimensions ---
+        # (These remain unchanged)
         for dim in plan.group_by_dimensions:
             col_ref = self._dim_ref(dim.table, dim.column)
             select_exprs.append(f"{col_ref} AS {dim.name}")
 
         select_clause = "SELECT\n  " + ",\n  ".join(select_exprs)
 
-        # -------- FROM + JOIN clause --------
-
-        # Anchor table is the measure's table
+        # ======================
+        # 2. FROM + JOINS
+        # ======================
         base_table = plan.measure.table
         from_clause = f"FROM {base_table}"
-
-        # We are not aliasing tables for now, so we can use table names directly
         joined_tables = {base_table}
 
         join_clauses = []
         for edge in joins:
-            # Decide which side to join based on what we've already included
             if edge.source in joined_tables and edge.target not in joined_tables:
-                # join target to existing source
                 join_clause = (
                     f"JOIN {edge.target} "
                     f"ON {self._dim_ref(edge.source, edge.source_column)} "
@@ -99,8 +113,8 @@ class SQLGenerator:
                 )
                 joined_tables.add(edge.target)
                 join_clauses.append(join_clause)
+
             elif edge.target in joined_tables and edge.source not in joined_tables:
-                # join source to existing target (reverse direction)
                 join_clause = (
                     f"JOIN {edge.source} "
                     f"ON {self._dim_ref(edge.source, edge.source_column)} "
@@ -108,38 +122,56 @@ class SQLGenerator:
                 )
                 joined_tables.add(edge.source)
                 join_clauses.append(join_clause)
-            else:
-                # Either both already joined, or neither anchored yet.
-                # If both are already present, we can skip.
-                # If neither is present, this edge will be handled when we
-                # reach a connected edge in the path.
-                continue
 
         join_section = ""
         if join_clauses:
             join_section = "\n" + "\n".join(join_clauses)
 
-        # -------- WHERE clause --------
+        # ======================
+        # 3. WHERE CLAUSE
+        # ======================
         where_parts = []
 
-        time_predicate = self._apply_time_filter(plan)
-        if time_predicate:
-            where_parts.append(time_predicate)
+        time_pred = self._apply_time_filter(plan)
+        if time_pred:
+            where_parts.append(time_pred)
 
         where_clause = ""
         if where_parts:
             where_clause = "\nWHERE " + " AND ".join(where_parts)
 
-        # -------- GROUP BY clause --------
-        group_by_clause = ""
-        if plan.group_by_dimensions:
-            group_exprs = [
-                self._dim_ref(dim.table, dim.column)
-                for dim in plan.group_by_dimensions
+        # ======================
+        # 4. GROUP BY CLAUSE
+        # ======================
+        # ---- REMOVE RAW TIME DIM GROUP-BY WHEN TIME GRAIN EXISTS ----
+        if plan.time_grain and plan.time_dimension:
+            plan.group_by_dimensions = [
+                d for d in plan.group_by_dimensions
+                if d.name != plan.time_dimension.name
             ]
-            group_by_clause = "\nGROUP BY " + ", ".join(group_exprs)
+            
+        group_by_exprs = []
 
-        # -------- Final SQL --------
+        # --- Time grain grouping FIXED ---
+        if grain_expr:
+            # Use only DATE_TRUNC — do NOT include raw date
+            group_by_exprs.append(grain_expr.split(" AS ")[0])
+
+        elif time_col:
+            # No grain → group by raw date
+            group_by_exprs.append(time_col)
+
+        # --- Dimension grouping ---
+        for dim in plan.group_by_dimensions:
+            group_by_exprs.append(self._dim_ref(dim.table, dim.column))
+
+        group_by_clause = ""
+        if group_by_exprs:
+            group_by_clause = "\nGROUP BY " + ", ".join(group_by_exprs)
+
+        # ======================
+        # 5. Final SQL
+        # ======================
         sql = (
             select_clause
             + "\n"
@@ -150,3 +182,7 @@ class SQLGenerator:
         )
 
         return sql
+
+
+
+

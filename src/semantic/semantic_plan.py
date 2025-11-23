@@ -26,3 +26,4 @@ class SemanticPlan:
     time_dimension: Optional[Dimension]
     time_filter: Optional[str]
     group_by_dimensions: List[Dimension]
+    time_grain: Optional[str] = None #Represents the grain to GROUP BY:"day", "month", "quarter", "year". If None, we group by raw date column.
