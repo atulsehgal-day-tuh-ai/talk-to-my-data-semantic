@@ -48,8 +48,9 @@ Note:
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 import yaml
+import re
 
 
 # -----------------------------
@@ -115,7 +116,35 @@ class SemanticModel:
         self.tables = self._load_tables(spec.get("tables", {}))
         self.measures = self._load_measures(spec.get("measures", {}))
         self.dimensions = self._load_dimensions(spec.get("dimensions", {}))
+
         self.relationships = self._load_relationships(spec.get("relationships", []))
+        # -----------------------------------------------------------
+        # NEW: Explicit column → table mapping from YAML
+        # -----------------------------------------------------------
+        # In your YAML you added:
+        # columns:
+        #   l_orderkey: lineitem
+        #   ps_supplycost: partsupp
+        #   ...
+        #
+        # This avoids prefix guessing and makes cross-table
+        # measures (e.g., profit) totally reliable.
+        # -----------------------------------------------------------
+        self.column_to_table: Dict[str, str] = spec.get("columns", {})
+
+        # -----------------------------------------------------------
+        # NEW: General-purpose token regex
+        # -----------------------------------------------------------
+        # This matches ANY SQL identifier-like token:
+        #   ps_supplycost
+        #   l_extendedprice
+        #   customer_id
+        #   discount1
+        #
+        # BUT: We only accept tokens actually present in column_to_table.
+        # -----------------------------------------------------------
+        self._token_regex = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\b")
+        
 
     # ---------- Loaders ----------
 
@@ -179,6 +208,15 @@ class SemanticModel:
     def _load_relationships(self, block: List[Dict[str, Any]]) -> List[Relationship]:
         rels = []
         for rel in block:
+
+            # ----------------------------------------
+            # DEBUG LOG — THIS WILL SHOW THE BROKEN ROW
+            # ----------------------------------------
+            print("\nDEBUG REL:", rel)
+            print("FROM STRING:", rel.get("from"))
+            print("TO STRING:", rel.get("to"))
+            # ----------------------------------------
+
             from_table, from_col = rel["from"].split(".")
             to_table, to_col = rel["to"].split(".")
             rels.append(
@@ -193,6 +231,39 @@ class SemanticModel:
                 )
             )
         return rels
+    
+    # -----------------------------------------------------------
+    # NEW: Infer which tables a measure expression depends on
+    # -----------------------------------------------------------
+    def infer_tables_from_expression(self, expression: str) -> Set[str]:
+        """
+        Identify ALL tables whose columns appear inside a measure expression.
+
+        Example expression:
+            "SUM(l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity)"
+
+        Tokens found (via regex):
+            ["SUM", "l_extendedprice", "l_discount",
+             "ps_supplycost", "l_quantity"]
+
+        Filtered tokens:
+            keep only those present in column_to_table.
+
+        Output:
+            {"lineitem", "partsupp"}
+        """
+        tables: Set[str] = set()
+
+        # Extract all tokens
+        tokens = self._token_regex.findall(expression)
+
+        # Map each token to its table, if present in YAML mapping
+        for col in tokens:
+            tbl = self.column_to_table.get(col)
+            if tbl:
+                tables.add(tbl)
+
+        return tables
 
 
 # ----------------------------------

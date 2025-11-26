@@ -435,21 +435,97 @@ relationships:
     role: product_hierarchy
     description: Line items reference a specific part.
 
-  - from: lineitem.l_suppkey
-    to: supplier.s_suppkey
-    type: many_to_one
-    role: supplier_hierarchy
-    description: Line items reference a specific supplier.
+  # - from: lineitem.l_suppkey
+  #   to: supplier.s_suppkey
+  #   type: many_to_one
+  #   role: supplier_hierarchy
+  #   description: Line items reference a specific supplier.
 
-  - from: partsupp.ps_partkey
-    to: part.p_partkey
-    type: many_to_one
-    role: product_hierarchy
-    description: Part–supplier cost mapping for each part.
+  # - from: partsupp.ps_partkey
+  #   to: part.p_partkey
+  #   type: many_to_one
+  #   role: product_hierarchy
+  #   description: Part–supplier cost mapping for each part.
 
   - from: partsupp.ps_suppkey
     to: supplier.s_suppkey
     type: many_to_one
     role: supplier_hierarchy
     description: Part–supplier cost mapping for each supplier.
+
+  # Lineitem → Partsupp based on partkey and suppkey composite foreign key
+  # - from: "lineitem.l_partkey, lineitem.l_suppkey"
+  #   to: "partsupp.ps_partkey, partsupp.ps_suppkey"
+  #   type: many_to_one
+  #   role: product_hierarchy
+  #   description: Correct TPC-H composite join between lineitem and partsupp.
+
+  # Explanation of the two separate relationships for composite key join:
+  # ✔️ Two separate relationships
+  # ✔️ Same source table (lineitem)
+  # ✔️ Same target table (partsupp)
+  # ✔️ Different source columns
+  # ✔️ Different target columns
+  # ✔️ SQL builder will detect they share the same pair of tables
+  # ✔️ SQL builder will merge them into one ON clause with AND
+
+  # Lineitem → Partsupp based on partkey  
+  - from: lineitem.l_partkey
+    to: partsupp.ps_partkey
+    type: many_to_one
+    role: product_hierarchy
+    description: Join on part key to reach part-supplier cost mapping.
+
+  # Lineitem → Partsupp based on suppkey  
+  - from: lineitem.l_suppkey
+    to: partsupp.ps_suppkey
+    type: many_to_one
+    role: supplier_hierarchy
+    description: Join on supplier key to reach part-supplier cost mapping.
+
+
+# Declare explicit column → table mapping in YAML to help with ambiguous columns
+columns:
+  # lineitem
+  l_orderkey: lineitem
+  l_partkey: lineitem
+  l_suppkey: lineitem
+  l_quantity: lineitem
+  l_extendedprice: lineitem
+  l_discount: lineitem
+
+  # orders
+  o_orderkey: orders
+  o_custkey: orders
+  o_orderdate: orders
+
+  # partsupp
+  ps_partkey: partsupp
+  ps_suppkey: partsupp
+  ps_supplycost: partsupp
+  ps_availqty: partsupp
+
+  # part
+  p_partkey: part
+  p_name: part
+  p_brand: part
+
+  # supplier
+  s_suppkey: supplier
+  s_nationkey: supplier
+  s_name: supplier
+
+  # customer
+  c_custkey: customer
+  c_nationkey: customer
+  c_name: customer
+
+  # nation
+  n_nationkey: nation
+  n_regionkey: nation
+
+  # region
+  r_regionkey: region
+  r_name: region
+
 

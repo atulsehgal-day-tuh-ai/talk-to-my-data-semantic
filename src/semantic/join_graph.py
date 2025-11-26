@@ -123,9 +123,9 @@ This will allow SQL generation to become fully automatic.
 
 
 from dataclasses import dataclass
-import queue
 from typing import List, Dict, Optional, Set
 from collections import deque
+import re
 
 
 # This is the most basic building block of join relationships
@@ -150,6 +150,11 @@ class JoinGraph:
     graph = {
         "lineitem": [JoinEdge(...), JoinEdge(...)],
         "orders": [JoinEdge(...)]
+
+    Supports:
+      - composite joins (expanded into multiple edges)
+      - semantic path finding
+      - raw BFS shortest path
     }
     """
 
@@ -157,6 +162,26 @@ class JoinGraph:
     def __init__(self):
         # adjacency list: graph[table] = [JoinEdge, JoinEdge, ...]
         self.graph: Dict[str, List[JoinEdge]] = {}
+
+        # ---------------------------------------------
+        # NEW: regex for extracting column identifiers
+        # Example matches: l_extendedprice, ps_supplycost, o_orderdate
+        # ---------------------------------------------
+        self._column_regex = re.compile(r"\b([A-Za-z]+_[A-Za-z0-9_]+)\b")
+
+        # ---------------------------------------------
+        # NEW: table → column names mapping
+        # The resolver will use this to detect which tables
+        # are referenced in a measure expression.
+        # ---------------------------------------------
+        self.table_columns = {}   # gets populated later via attach_model()
+
+
+    # expose regex as a public attribute
+    @property
+    def column_regex(self):
+        return self._column_regex
+
 
     def add_edge(self, edge: JoinEdge):
 
@@ -183,20 +208,19 @@ class JoinGraph:
         # dimension → fact
         # dimension → another dimension
 
-        # reverse_edge = JoinEdge(
-        #     source=edge.target,
-        #     target=edge.source,
-        #     source_column=edge.target_column,
-        #     target_column=edge.source_column,
-        #     role=edge.role,
-        #     description=edge.description
-        # )
-        # self.graph[edge.target].append(reverse_edge)
+        reverse_edge = JoinEdge(
+            source=edge.target,
+            target=edge.source,
+            source_column=edge.target_column,
+            target_column=edge.source_column,
+            role=edge.role,
+            description=edge.description
+        )
+        self.graph[edge.target].append(reverse_edge)
 
-        # Ensure target table exists in graph but DO NOT add reverse join
-        if edge.target not in self.graph:
-            self.graph[edge.target] = []
-
+        # # Ensure target table exists in graph but DO NOT add reverse join
+        # if edge.target not in self.graph:
+        #     self.graph[edge.target] = []
 
 
 
@@ -217,15 +241,31 @@ class JoinGraph:
         # Loop through all relationships in the semantic model
         # Create a JoinEdge out of it
         for rel in model.relationships:
-            edge = JoinEdge(
-                source=rel.from_table,
-                target=rel.to_table,
-                source_column=rel.from_column,
-                target_column=rel.to_column,
-                role=rel.role,
-                description=rel.description,
-            )
-            graph.add_edge(edge)
+            # --- NEW: detect composite join keys ---
+            from_cols = rel.from_column.split(",")
+            to_cols = rel.to_column.split(",")
+
+            # remove whitespace
+            from_cols = [c.strip() for c in from_cols]
+            to_cols = [c.strip() for c in to_cols]
+
+            if len(from_cols) != len(to_cols):
+                raise ValueError(f"Relationship mismatch: {rel.from_column} vs {rel.to_column}")
+
+            # If composite → create multiple edges
+            for fc, tc in zip(from_cols, to_cols):
+                edge = JoinEdge(
+                    source=rel.from_table,
+                    target=rel.to_table,
+                    source_column=fc,
+                    target_column=tc,
+                    role=rel.role,
+                    description=rel.description,
+                )
+                graph.add_edge(edge)
+
+        # NEW — attach the table-column mapping
+        graph.attach_model(model)
 
         return graph
 
@@ -240,6 +280,18 @@ class JoinGraph:
             for e in edges:
                 print(f"   {e.source}.{e.source_column}  →  {e.target}.{e.target_column}")
             print()
+
+
+    def attach_model(self, model):
+        """
+        Attach the semantic model so JoinResolver can determine
+        which tables contain which columns.
+        Called AFTER JoinGraph.from_model().
+        """
+        self.table_columns = {
+            tname: set(tbl.columns.keys())
+            for tname, tbl in model.tables.items()
+        }
 
     #################################################################################
     #### find_path_raw() = PHYSICAL shortest path #####

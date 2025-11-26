@@ -89,6 +89,29 @@ class JoinResolver:
         return set()
 
 
+    def _extract_tables_from_measure(self, expression: str) -> Set[str]:
+        """
+        Parse measure SQL expression and extract all tables referenced by column names.
+
+        Example: SUM(l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity)
+        → returns {"lineitem", "partsupp"}
+
+        Uses the semantic model's table->columns map.
+        """
+        referenced = set()
+
+        # tokens like l_extendedprice, ps_supplycost, o_orderdate
+        tokens = self.graph.column_regex.findall(expression)
+
+        for token in tokens:
+            # check each table to see who owns the column
+            for tbl, columns in self.graph.table_columns.items():
+                if token in columns:
+                    referenced.add(tbl)
+
+        return referenced
+
+
     def joins_for_plan(self, plan: SemanticPlan) -> List[JoinEdge]:
         """
         Given the semantic plan, compute all join edges required
@@ -96,16 +119,17 @@ class JoinResolver:
         - time dimension table
         - all group-by dimension tables
 
+        Compute all JOIN edges needed for:
+        - measure table
+        - any tables referenced by the measure expression   (NEW)
+        - time dimension
+        - group-by dimensions
+
         This version is ROLE-AWARE:
         -----------------------------------------
         For ambiguous dimensions (like region, nation),
         we prefer certain semantic relationship roles,
         e.g., customer geography over supplier geography.
-
-        Example:
-            "revenue by region last year"
-            - lineitem → supplier → nation → region (short path)
-            - lineitem → orders → customer → nation → region (semantically correct)
 
         We use:
         1) Preferred roles (semantic priority)
@@ -114,34 +138,37 @@ class JoinResolver:
 
         # ------------------------------------------------------------
         # Step 1 — Start at the measure table
-        # All join paths begin from the fact table of the measure.
         # ------------------------------------------------------------
         measure_table = plan.measure.table
 
         # ------------------------------------------------------------
         # Step 2 — Identify all target tables
-        # These come from:
-        #   - time_dimension.table
-        #   - each group-by dimension table
-        #
-        # But now we also compute preferred roles for each target.
         # ------------------------------------------------------------
         targets: List[tuple[str, Optional[Set[str]]]] = []
 
-        # Time dimension first
+        # 2A — Time dimension target
         if plan.time_dimension:
             dim = plan.time_dimension
             preferred_roles = self._preferred_roles_for_dimension(dim.name, dim.table)
             targets.append((dim.table, preferred_roles))
 
-        # Group-by dimensions
+        # 2B — Group-by dimension targets
         for dim in plan.group_by_dimensions:
             preferred_roles = self._preferred_roles_for_dimension(dim.name, dim.table)
             targets.append((dim.table, preferred_roles))
 
         # ------------------------------------------------------------
-        # Step 3 — For each target, compute the JOIN PATH
-        # Using the role-aware find_path() we added earlier.
+        # 2C — NEW: Add tables referenced inside the measure expression
+        # ------------------------------------------------------------
+        referenced_tables = self._extract_tables_from_measure(plan.measure.expression)
+
+        for tbl in referenced_tables:
+            if tbl != measure_table:
+                # For measure-derived tables we do NOT enforce preferred roles
+                targets.append((tbl, None))
+
+        # ------------------------------------------------------------
+        # Step 3 — Resolve join paths for every target
         # ------------------------------------------------------------
         all_edges: List[JoinEdge] = []
 
@@ -157,11 +184,32 @@ class JoinResolver:
                     f"No join path found from measure table '{measure_table}' → '{table}'"
                 )
 
+            # Add the primary path edges
             all_edges.extend(path)
 
+            # ---------- 🔴 IMPORTANT NEW GUARD ----------
+            # If start == target (e.g. measure table and time dimension
+            # both on 'orders'), find_path() returns [].
+            # In that case, there is no join to add and no "parallel edge"
+            # logic to run.
+            if not path:
+                continue
+
+            last_edge = path[-1]
+
+            # --- NEW: also include parallel edges between the same two tables
+            #          (needed for composite join conditions like
+            #           lineitem.l_partkey & lineitem.l_suppkey → partsupp.*)
+            for e in self.graph.graph.get(last_edge.source, []):
+                if e.target == last_edge.target and e not in path:
+                    all_edges.append(e)
+
+            for e in self.graph.graph.get(last_edge.target, []):
+                if e.source == last_edge.source and e not in path:
+                    all_edges.append(e)
+
         # ------------------------------------------------------------
-        # Step 4 — Deduplicate edges while preserving order
-        # Multiple group-by dimensions may require the same joins.
+        # Step 4 — Deduplicate edges (preserve original order)
         # ------------------------------------------------------------
         unique_edges: List[JoinEdge] = []
         seen: Set[tuple] = set()
@@ -172,8 +220,6 @@ class JoinResolver:
                 seen.add(key)
                 unique_edges.append(edge)
 
-        # ------------------------------------------------------------
-        # Step 5 — Return final JoinEdge list
-        # This is the unified join path for the entire query.
-        # ------------------------------------------------------------
         return unique_edges
+
+
