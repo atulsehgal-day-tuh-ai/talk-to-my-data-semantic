@@ -1,5 +1,5 @@
 bundle:
-  name: talk_to_my_data
+  name: talk_to_my_data_semantic
   type: python
   version: 1.0.0
 

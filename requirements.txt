@@ -3,6 +3,7 @@ langchain>=0.2.10
 langchain-core>=0.2.10
 langchain-community>=0.2.10
 langchain-openai>=0.1.7
+langsmith>=0.1.0
 
 # --- Snowflake + SQL ---
 snowflake-connector-python==3.10.0

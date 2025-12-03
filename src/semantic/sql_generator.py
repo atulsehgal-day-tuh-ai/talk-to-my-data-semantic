@@ -81,9 +81,9 @@ class SQLGenerator:
                     f"AS {plan.time_grain}_date"
                 )
                 select_exprs.append(grain_expr)
-            else:
+            # else:
                 # raw date (when no grain exists)
-                select_exprs.append(f"{time_col} AS {plan.time_dimension.name}")
+                # select_exprs.append(f"{time_col} AS {plan.time_dimension.name}")
 
         # Cleaned group-by dimensions (do NOT mutate the plan!)
         if plan.time_grain and plan.time_dimension:
@@ -196,8 +196,8 @@ class SQLGenerator:
 
         if grain_expr:
             group_by_exprs.append(grain_expr.split(" AS ")[0])
-        elif time_col:
-            group_by_exprs.append(time_col)
+        #elif time_col:
+        #    group_by_exprs.append(time_col)
 
         for dim in cleaned_group_dims:
             group_by_exprs.append(self._dim_ref(dim.table, dim.column))
