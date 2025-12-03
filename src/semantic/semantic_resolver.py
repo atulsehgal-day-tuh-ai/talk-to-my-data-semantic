@@ -35,6 +35,7 @@ Methods:
             json.JSONDecodeError: If the LLM response is not valid JSON
 """
 
+import numpy as np
 from typing import List, Optional
 from langchain_openai import ChatOpenAI
 import json
@@ -42,10 +43,119 @@ import json
 from src.semantic.semantic_model import SemanticModel
 from src.semantic.semantic_plan import SemanticPlan
 
+from .embedding_store import EmbeddingIndex
+
 class SemanticResolver:
-    def __init__(self, semantic_model: SemanticModel):
+    def __init__(self, semantic_model: SemanticModel, embedding_index: EmbeddingIndex = None, embedding_model=None):
+        """
+        embedding_index is optional — if provided, we enable embedding-based lookup.
+        """
         self.model = semantic_model
+        self.embedding_index = embedding_index
+        self.embedding_model = embedding_model
         self.llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+    # --------------------------------------------
+    # Embedding-powered semantic lookup helpers
+    # --------------------------------------------
+    def _semantic_best_measure(self, question: str):
+        """
+        Return the best matching MEASURE using semantic embeddings.
+
+        The logic follows a 4-stage decision pipeline:
+
+        1. **If no embedding index loaded** → fall back to YAML lookup
+        2. **Convert question into an embedding vector**
+        3. **Retrieve the top semantic matches (filter=measure)**
+        4. **Apply a robust acceptance rule**:
+                - top1_score must exceed a minimum floor (0.15)
+                - AND top1 must beat top2 by a margin (> 0.05)
+        If these are satisfied → return that measure.
+        Otherwise → fallback to YAML lookup.
+        """
+
+        # 1 — Embeddings disabled → use YAML matching
+        if not self.embedding_index:
+            return self.model.get_measure(question)
+
+        # 2 — Try embedding the user question
+        query_vector = self._embed_query_text(question)
+        if query_vector is None:
+            return self.model.get_measure(question)
+
+        # 3 — Retrieve top-K most similar measures from the embedding index
+        results = self.embedding_index.search_measure(query_vector, top_k=5)
+        if not results:
+            return self.model.get_measure(question)
+
+        # Top-1 result
+        best_item, best_score = results[0]
+
+        # Top-2 (if available) for relative comparison
+        if len(results) > 1:
+            second_item, second_score = results[1]
+        else:
+            second_score = 0.0
+
+        # ----- Decision Rule -----
+        # FLOOR: If the similarity is extremely low → reject it (avoid hallucinations)
+        MIN_SCORE = 0.15
+
+        # MARGIN: Top1 must be meaningfully better than top2 → ensures disambiguation
+        MARGIN = 0.05
+
+        if best_score >= MIN_SCORE and (best_score - second_score) >= MARGIN:
+            return self.model.measures.get(best_item.name)
+
+        # Otherwise → fallback
+        return self.model.get_measure(question)
+
+
+    def _semantic_best_dimension(self, token: str):
+        """
+        Return the best matching DIMENSION using semantic embeddings.
+
+        Pipeline logic (same structure as measures):
+
+        1. No embedding → YAML fallback
+        2. Embed the token (e.g., "cust", "regn")
+        3. Query only DIMENSION-type embeddings
+        4. Accept result only if:
+            - score > minimum floor (0.10–0.15 works well for short dim names)
+            - AND top1 is significantly higher than top2 (margin rule)
+        Else → revert to YAML dimension resolution.
+        """
+
+        # 1 — Embeddings unavailable
+        if not self.embedding_index:
+            return self.model.get_dimension(token)
+
+        # 2 — Embed the input text
+        query_vector = self._embed_query_text(token)
+        if query_vector is None:
+            return self.model.get_dimension(token)
+
+        # 3 — Retrieve top dimension results
+        results = self.embedding_index.search_dimension(query_vector, top_k=5)
+        if not results:
+            return self.model.get_dimension(token)
+
+        # Extract top-1 and top-2
+        best_item, best_score = results[0]
+        second_score = results[1][1] if len(results) > 1 else 0.0
+
+        # ----- Thresholds tuned specifically for DIMENSIONS -----
+        # Dimensions are short ("nation", "region", "cust") → embeddings match weaker
+        MIN_SCORE = 0.12      # slightly lower than measures
+        MARGIN = 0.04         # dimensions tend to cluster closer → smaller margin ok
+
+        # Apply decision rule
+        if best_score >= MIN_SCORE and (best_score - second_score) >= MARGIN:
+            return self.model.dimensions.get(best_item.name)
+
+        # 4 — Fallback to YAML resolution
+        return self.model.get_dimension(token)
+
 
 
     def _detect_time_grain(self, question: str) -> Optional[str]:
@@ -159,45 +269,69 @@ class SemanticResolver:
         # -------------------------------------------------------------
         # Step 6 — Resolve MEASURE
         # -------------------------------------------------------------
-        measure_name = data.get("measure")
-        if measure_name not in self.model.measures:
-            raise KeyError(f"Invalid measure from LLM: {measure_name}")
 
-        measure = self.model.measures[measure_name]
+        # Resolve MEASURE (LLM → embeddings → fallback)
+        measure_name_llm = data.get("measure")
+
+        # Prefer embedding match over LLM match
+        measure = self._semantic_best_measure(measure_name_llm)
+
+        # If the LLM found a measure name, prefer that if valid
+        if measure_name_llm and measure_name_llm in self.model.measures:
+            measure = self.model.measures[measure_name_llm]
+
+        if not measure:
+            raise KeyError(f"Could not resolve measure from question: {question}")
 
         # -------------------------------------------------------------
         # Step 7 — Resolve TIME DIMENSION
         # -------------------------------------------------------------
-        time_dim_name = data.get("time_dimension")
-        if time_dim_name:
-            time_dim_name = time_dim_name.lower()
-            if time_dim_name not in self.model.dimensions:
-                raise KeyError(f"Invalid time dimension from LLM: {time_dim_name}")
-            time_dim = self.model.dimensions[time_dim_name]
-        else:
-            time_dim = None
+        time_dim = None
+
+        if data.get("time_dimension"):
+            # First try LLM output
+            dim_name_llm = data["time_dimension"]
+            if dim_name_llm in self.model.dimensions:
+                time_dim = self.model.dimensions[dim_name_llm]
+
+        # If LLM failed → try embedding match on question
+        if not time_dim:
+            time_dim = self._semantic_best_dimension(question)
+
+        # Validate it is actually a time dimension
+        if time_dim and not time_dim.time_grains:
+            time_dim = None  # not a real time dim
+
 
         # -------------------------------------------------------------
-        # Step 8 — Resolve GROUP-BY DIMENSIONS
+        # Step 8 — Resolve GROUP-BY DIMENSIONS (LLM → embeddings → fallback)
         # -------------------------------------------------------------
+        group_dims = []
         group_by_list = data.get("group_by_dimensions", [])
 
-        # These words must NEVER be treated as dimensions
-        TIME_GRAIN_WORDS = {"day", "month", "quarter", "year"}
+        for dim_name_llm in group_by_list:
 
-        group_dims = []
-        for dim_name in group_by_list:
-            dim_name = dim_name.lower()
+            dim_name_llm_lower = dim_name_llm.lower()
 
-            # Skip invalid time-grain pseudo-dimensions
-            if dim_name in TIME_GRAIN_WORDS:
+            dim = None
+
+            # 1) Direct name match
+            if dim_name_llm_lower in self.model.dimensions:
+                dim = self.model.dimensions[dim_name_llm_lower]
+
+            # 2) Embedding match (best for fuzzy)
+            if dim is None:
+                dim = self._semantic_best_dimension(dim_name_llm)
+
+            # 3) No fallback to full question — prevents wrong matches!
+            if dim is None:
+                raise KeyError(f"Invalid group-by dimension: {dim_name_llm}")
+
+            # 4) Prevent grouping by the time dimension
+            if time_dim and dim.name == time_dim.name:
                 continue
 
-            if dim_name in self.model.dimensions:
-                group_dims.append(self.model.dimensions[dim_name])
-            else:
-                raise KeyError(f"Invalid group-by dimension: {dim_name}")
-
+            group_dims.append(dim)
 
         # -------------------------------------------------------------
         # Step 9 — Build and return the final semantic plan
@@ -209,3 +343,22 @@ class SemanticResolver:
             group_by_dimensions=group_dims,
             time_grain=time_grain
         )
+
+    def _embed_query_text(self, text: str):
+        """
+        Embed query text using the configured embedding model.
+        Uses LangChain's OpenAIEmbeddings.embed_query().
+        Prints errors instead of hiding them.
+        """
+        if self.embedding_model is None:
+            print("No embedding_model configured.")
+            return None
+
+        try:
+            # LangChain OpenAIEmbeddings → returns a Python list
+            vec = self.embedding_model.embed_query(text)
+            return np.asarray(vec, dtype="float32")
+
+        except Exception as e:
+            print(f"[Embedding Error] Could not embed text '{text}': {e}")
+            return None

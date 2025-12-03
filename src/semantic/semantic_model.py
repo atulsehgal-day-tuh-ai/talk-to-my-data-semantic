@@ -209,13 +209,13 @@ class SemanticModel:
         rels = []
         for rel in block:
 
-            # ----------------------------------------
-            # DEBUG LOG — THIS WILL SHOW THE BROKEN ROW
-            # ----------------------------------------
-            print("\nDEBUG REL:", rel)
-            print("FROM STRING:", rel.get("from"))
-            print("TO STRING:", rel.get("to"))
-            # ----------------------------------------
+            # # ----------------------------------------
+            # # DEBUG LOG — THIS WILL SHOW THE BROKEN ROW
+            # # ----------------------------------------
+            # print("\nDEBUG REL:", rel)
+            # print("FROM STRING:", rel.get("from"))
+            # print("TO STRING:", rel.get("to"))
+            # # ----------------------------------------
 
             from_table, from_col = rel["from"].split(".")
             to_table, to_col = rel["to"].split(".")

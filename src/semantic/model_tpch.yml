@@ -354,7 +354,7 @@ dimensions:
     table: customer
     column: c_name
     description: Customer name.
-    synonyms: [customer, client]
+    synonyms: [customer, client, buyer, purchaser]
 
   customer_segment:
     table: customer
