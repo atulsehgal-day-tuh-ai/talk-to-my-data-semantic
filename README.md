@@ -275,10 +275,9 @@ Converts Plan + Join Edges → **Snowflake SQL**.
 ---
 
 
----
 
 
-# 🔍 What is BFS and Why Does the Join Resolver Use It?
+# 🧠 What is BFS and Why Does the Join Resolver Use It?
 
 In the context of the **Layer 3: Graph Routing** diagram, **BFS** stands for **Breadth-First Search** — a fundamental algorithm used to explore graphs (networks of connected nodes).  
 In this system, BFS is used to determine **how database tables should be joined** to satisfy a Semantic Plan.
@@ -362,6 +361,149 @@ Together:
 - **BFS Join Resolution** defines *HOW* to compute it  
 
 ---
+
+
+
+# 🧠 Purpose and Use of Embeddings in the Semantic Engine
+
+Embeddings bridge the gap between **natural language** and **database schema** by representing words and phrases as numerical vectors that capture meaning, similarity, and intent.
+
+They ensure that fuzzy, misspelled, or non-technical user input is mapped to the **correct measures, dimensions, and attributes** in your semantic model.
+
+---
+
+## 🔍 What Are Embeddings?
+
+An **embedding** is a vector that encodes the semantic meaning of text.  
+Words/phrases with similar intent have vectors that are close to each other in vector space.
+
+Examples:
+
+| User Input        | Embedding Match     | Why |
+|------------------|----------------------|-----|
+| "gm"            | `profit`             | Similar to "gross margin" |
+| "custmr region" | `customer_region`    | Handles spelling + meaning |
+| "turnover"      | `revenue`            | Business synonym |
+| "parts cost"    | `ps_supplycost`      | Embedding detects cost semantics |
+
+Embeddings allow the system to understand intent even when the user does not use the exact YAML-defined terms.
+
+---
+
+## 🎯 Why Embeddings Are Essential
+
+### 1. Handle Fuzzy or Imperfect Input
+
+Users rarely type exact column names.  
+Embeddings map:
+
+- "profitability" → `profit`  
+- "qty sold"      → `l_quantity`  
+- "supplier cost" → `ps_supplycost`  
+
+This makes the system usable by business users, not just engineers.
+
+---
+
+### 2. Validate and Correct LLM Output
+
+LLMs often return synonyms, variants, or hallucinated field names.  
+Your system uses **hybrid logic**:
+
+1. The LLM extracts semantic intent (e.g., "profit", "supplier", "last quarter").
+2. Embeddings validate or correct the LLM output against the actual semantic model.
+3. The SemanticModel enforces canonical names from YAML.
+
+This guarantees that the final **SemanticPlan** uses only valid, known entities.
+
+---
+
+### 3. Map Natural Language → SemanticPlan → SQL
+
+Embeddings allow queries like:
+
+```text
+"What were supplier profits last quarter?"
+```
+
+to resolve into:
+
+- Measure: `profit`  
+- Dimension: `supplier_name`  
+- Time Grain: `quarter`  
+- Filter: last quarter  
+
+even if the original wording never mentioned the exact column or measure names.
+
+---
+
+## ⚙️ How Embeddings Work in the Code
+
+### Module: `src.semantic.embedding_store`  
+### Class: **EmbeddingIndex**
+
+#### During Model Initialization
+
+- All measures, dimensions, and key attributes are embedded using `text-embedding-3-large`.  
+- The resulting vectors are saved to `artifacts/semantic_embeddings_tpch.json`.  
+
+#### At Query Time
+
+1. The user query (or key phrases extracted by the LLM) is embedded with `embed_query`.  
+2. Cosine similarity search is performed against the stored vectors.  
+3. The top matching semantic entity (measure or dimension) is returned with a score.  
+
+This process is used by `_semantic_best_measure` and `_semantic_best_dimension` inside `SemanticResolver`.
+
+---
+
+## 🧩 Embeddings in the Semantic Pipeline
+
+```plaintext
+User Input
+    ↓
+LLM Extracts Intent (candidate fields, filters, grain)
+    ↓
+Embedding Search Validates / Corrects Those Candidates
+    ↓
+SemanticPlan (clean, canonical form)
+    ↓
+JoinResolver Determines Required Tables & Paths
+    ↓
+SQLGenerator Produces Final Snowflake SQL
+```
+
+- **LLM** = understand the question  
+- **Embeddings** = ground that understanding in real schema objects  
+- **SemanticPlan** = structured intent  
+- **JoinResolver** = topology & joins  
+- **SQLGenerator** = executable SQL  
+
+---
+
+## 🛡 Benefits of Embeddings
+
+- ✔ Handles typos, abbreviations, synonyms, and business jargon  
+- ✔ Provides stable, deterministic matching behavior  
+- ✔ Prevents LLM from hallucinating non-existent fields  
+- ✔ Ensures safe and correct SQL generation  
+- ✔ Makes the engine portable across domains (just rebuild the embedding index)  
+
+---
+
+## 📌 Summary
+
+Embeddings are the **semantic glue** that connects human language to your physical data model.  
+They:
+
+- Interpret fuzzy language  
+- Correct or refine LLM output  
+- Ensure deterministic semantic resolution  
+- Enable robust, enterprise-safe natural language querying on Snowflake.
+
+---
+
+
 
 
 # 🗺️ Database Join Diagram (Semantic Relationship Graph)
