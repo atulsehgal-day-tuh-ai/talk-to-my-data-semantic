@@ -277,6 +277,93 @@ Converts Plan + Join Edges → **Snowflake SQL**.
 
 ---
 
+
+# 🔍 What is BFS and Why Does the Join Resolver Use It?
+
+In the context of the **Layer 3: Graph Routing** diagram, **BFS** stands for **Breadth-First Search** — a fundamental algorithm used to explore graphs (networks of connected nodes).  
+In this system, BFS is used to determine **how database tables should be joined** to satisfy a Semantic Plan.
+
+---
+
+## **1. What is BFS?**
+
+Think of dropping a stone into a calm pond:
+
+- Ripples expand outward in perfect circles.
+- The closest areas are touched first.
+- Then the next layer.
+- Then the next.
+
+BFS works the same way when searching a graph:
+
+1. Start at a given table (e.g., `customer`)
+2. **Level 1:** Check all tables directly connected to it
+3. **Level 2:** Check all tables connected to those tables
+4. Repeat until the **target table** is found
+
+It explores the graph **layer by layer**.
+
+---
+
+## **2. Why BFS for Join Pathfinding?**
+
+When generating SQL, the system needs to find a path from **Table A → Table B**.
+
+Example:
+
+- **Path A:** `A → B` (simple, 1 join)
+- **Path B:** `A → C → D → B` (complex, 3 joins)
+
+BFS guarantees:
+
+> **The first time we reach the target table, we have found the shortest possible join path.**
+
+This ensures:
+
+- Shorter join paths → **faster SQL**
+- Fewer hops → **more accurate joins**
+- Deterministic behavior → **no hallucinated join chains**
+
+---
+
+## **3. What Rules Does BFS Apply?**
+
+Your JoinGraph + JoinResolver extend BFS with domain-specific logic:
+
+### ✔ Composite Join Rules
+Some relationships require multiple keys  
+(e.g., `lineitem` ↔ `partsupp` needs both `partkey` *and* `suppkey`).  
+BFS verifies all required keys before traversing the edge.
+
+### ✔ Cycle Detection
+Schemas may have loops: `A → B → C → A`  
+BFS maintains a **visited set** to prevent infinite loops.
+
+### ✔ Role Preference
+If multiple valid paths exist (e.g. customer vs supplier geography),  
+BFS uses **preferred role rules** to choose the correct path and avoid ambiguity.
+
+---
+
+## **4. How BFS Connects to the Code**
+
+### **SemanticModel**
+- Loads YAML relationships  
+- Produces the “edges” for the graph  
+
+### **JoinGraph + BFS**
+- Traverses those edges  
+- Applies rules  
+- Finds the shortest, valid join chain  
+
+Together:
+
+- The **Semantic Plan** defines *WHAT* to compute  
+- **BFS Join Resolution** defines *HOW* to compute it  
+
+---
+
+
 # 🗺️ Database Join Diagram (Semantic Relationship Graph)
 
 ```plaintext
